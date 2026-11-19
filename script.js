@@ -12,7 +12,7 @@ const startButton = document.querySelector('#start-game');
 
 const games = {
   chef: { title: 'Fast Food Chef', kicker: '// ORDER UP', instructions: 'Click the matching food before the order expires.', controls: 'MOUSE / CLICK' },
-  drive: { title: 'Drive Boss', kicker: '// PICK YOUR RISK', instructions: 'Switch between three lanes. Tap a lane or use A / D.', controls: 'A / D / ARROWS / TAP' },
+  flood: { title: 'Floodbound', kicker: '// RIDE THE RISE', instructions: 'Steer the raft, collect supplies, and avoid floating debris.', controls: 'A / D / ARROWS / TAP' },
   meteor: { title: 'Meteor Shooter', kicker: '// CLEAR THE SKY', instructions: 'Move with A / D and press SPACE or click to fire.', controls: 'A / D + SPACE / CLICK' }
 };
 
@@ -31,10 +31,6 @@ document.querySelectorAll('[data-close-game]').forEach((button) => button.addEve
 document.addEventListener('keydown', (event) => {
   keys[event.key.toLowerCase()] = true;
   if (event.key === 'Escape' && modal.classList.contains('is-open')) closeGame();
-  if (activeGame === 'drive' && running && !event.repeat) {
-    if (event.key === 'ArrowLeft' || event.key.toLowerCase() === 'a') moveDriveLane(-1);
-    if (event.key === 'ArrowRight' || event.key.toLowerCase() === 'd') moveDriveLane(1);
-  }
   if (event.code === 'Space' && activeGame === 'meteor' && running) { event.preventDefault(); shootMeteor(); }
 });
 document.addEventListener('keyup', (event) => { keys[event.key.toLowerCase()] = false; });
@@ -42,7 +38,7 @@ startButton.addEventListener('click', startGame);
 canvas.addEventListener('pointerdown', (event) => {
   const point = canvasPoint(event);
   if (activeGame === 'chef' && running) chefClick(point.x, point.y);
-  if (activeGame === 'drive' && running) selectDriveLane(point.x);
+  if (activeGame === 'flood' && running) selectFloodLane(point.x);
   if (activeGame === 'meteor' && running) { gameState.ship.x = point.x; shootMeteor(); }
 });
 window.addEventListener('resize', drawDemos);
@@ -78,7 +74,7 @@ function startGame() {
   score = 0;
   scoreOutput.textContent = '0000';
   overlay.style.display = 'none';
-  gameState = activeGame === 'chef' ? newChefState() : activeGame === 'drive' ? newDriveState() : newMeteorState();
+  gameState = activeGame === 'chef' ? newChefState() : activeGame === 'flood' ? newFloodState() : newMeteorState();
   lastFrame = performance.now();
   animationId = requestAnimationFrame(gameLoop);
 }
@@ -94,14 +90,14 @@ function gameLoop(now) {
 
 function updateGame(dt) {
   if (activeGame === 'chef') updateChef(dt);
-  if (activeGame === 'drive') updateDrive(dt);
+  if (activeGame === 'flood') updateFlood(dt);
   if (activeGame === 'meteor') updateMeteor(dt);
 }
 
 function drawGame(now) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (activeGame === 'chef') drawChef(ctx, canvas.width, canvas.height, gameState, now, true);
-  if (activeGame === 'drive') drawDrive(ctx, canvas.width, canvas.height, gameState, now, true);
+  if (activeGame === 'flood') drawFlood(ctx, canvas.width, canvas.height, gameState, now, true);
   if (activeGame === 'meteor') drawMeteor(ctx, canvas.width, canvas.height, gameState, now, true);
 }
 
@@ -130,86 +126,66 @@ function drawChef(c, w, h, s, now, full) {
 }
 function drawFood(c, x, y, type, size) { c.save(); c.translate(x, y); c.fillStyle = type === 0 ? '#ffd45a' : type === 1 ? '#7bd8ed' : '#bd91ff'; c.strokeStyle = '#111114'; c.lineWidth = 5; c.beginPath(); if (type === 0) c.arc(0, 0, size, 0, Math.PI * 2); if (type === 1) { c.moveTo(0, -size); c.lineTo(size, size); c.lineTo(-size, size); c.closePath(); } if (type === 2) { for (let i = 0; i < 8; i++) { const a = (Math.PI * 2 / 8) * i; c.lineTo(Math.cos(a) * size, Math.sin(a) * size); } c.closePath(); } c.fill(); c.stroke(); c.restore(); }
 
-const DRIVE_LANES = [
-  { multiplier: 5, label: 'RAINBOW', color: '#ff704a' },
-  { multiplier: 2, label: 'RUSH', color: '#7bd8ed' },
-  { multiplier: 1, label: 'SAFE', color: '#6cff57' }
-];
-
-function driveLaneX(width, lane) { return width * (0.25 + lane * 0.25); }
-function chooseDriveLane() {
-  const roll = Math.random();
-  if (roll < 0.52) return 0;
-  if (roll < 0.82) return 1;
-  return 2;
+function newFloodState() {
+  return { raftX: 450, targetX: 450, waterline: 370, debris: [], supplies: [], debrisSpawn: .6, supplySpawn: 1.2, time: 0, collected: 0, wave: 0 };
 }
-function newDriveState() {
-  return { lane: 1, targetLane: 1, carX: 450, roadOffset: 0, obstacles: [], spawn: .35, speed: 220, time: 0, distance: 0 };
+function selectFloodLane(x) {
+  if (!gameState || activeGame !== 'flood') return;
+  gameState.targetX = Math.max(55, Math.min(canvas.width - 55, x));
 }
-function moveDriveLane(direction) {
-  if (!gameState || activeGame !== 'drive') return;
-  gameState.targetLane = Math.max(0, Math.min(2, gameState.targetLane + direction));
-}
-function selectDriveLane(x) {
-  if (!gameState || activeGame !== 'drive') return;
-  gameState.targetLane = Math.max(0, Math.min(2, Math.floor(x / (canvas.width / 3))));
-}
-function updateDrive(dt) {
+function updateFlood(dt) {
   const s = gameState;
   s.time += dt;
-  s.roadOffset = (s.roadOffset + s.speed * dt) % 88;
-  s.carX += (driveLaneX(canvas.width, s.targetLane) - s.carX) * Math.min(1, dt * 14);
-  s.lane = Math.abs(s.carX - driveLaneX(canvas.width, s.targetLane)) < 18 ? s.targetLane : s.lane;
-  s.spawn -= dt;
-  if (s.spawn <= 0) {
-    s.spawn = Math.max(.48, 1.05 - s.time / 75);
-    const lane = chooseDriveLane();
-    s.obstacles.push({ lane, y: -72, color: lane === 0 ? '#ff9c40' : Math.random() > .5 ? '#bd91ff' : '#7bd8ed', width: lane === 0 ? 36 : 30 });
-    if (lane === 0 && Math.random() < .34) s.obstacles.push({ lane: 0, y: -240, color: '#ef3838', width: 34 });
+  s.wave += dt * 3;
+  s.waterline = Math.max(150, 370 - s.time * 4.4);
+  if (keys.a || keys.arrowleft) s.targetX -= 270 * dt;
+  if (keys.d || keys.arrowright) s.targetX += 270 * dt;
+  s.targetX = Math.max(55, Math.min(canvas.width - 55, s.targetX));
+  s.raftX += (s.targetX - s.raftX) * Math.min(1, dt * 12);
+  s.debrisSpawn -= dt;
+  s.supplySpawn -= dt;
+  if (s.debrisSpawn <= 0) {
+    s.debrisSpawn = Math.max(.38, .9 - s.time / 90);
+    s.debris.push({ x: 45 + Math.random() * (canvas.width - 90), y: -50, size: 20 + Math.random() * 12, speed: 110 + Math.random() * 70, angle: Math.random() * 2 });
   }
-  for (const obstacle of s.obstacles) obstacle.y += s.speed * dt;
-  s.obstacles = s.obstacles.filter((obstacle) => obstacle.y < canvas.height + 90);
-  for (const obstacle of s.obstacles) {
-    const obstacleX = driveLaneX(canvas.width, obstacle.lane);
-    if (Math.abs(obstacleX - s.carX) < obstacle.width + 25 && Math.abs(obstacle.y - (canvas.height - 88)) < 74) {
-      endGame('CRASHED OUT');
-      return;
-    }
+  if (s.supplySpawn <= 0) {
+    s.supplySpawn = 1.25 + Math.random() * .8;
+    s.supplies.push({ x: 55 + Math.random() * (canvas.width - 110), y: -25, size: 18, speed: 90 + Math.random() * 35, spin: Math.random() * 6 });
   }
-  s.distance += s.speed * dt;
-  score = Math.floor(s.distance * DRIVE_LANES[s.lane].multiplier / 10);
+  s.debris.forEach((item) => { item.y += item.speed * dt; item.angle += dt * 2; });
+  s.supplies.forEach((item) => { item.y += item.speed * dt; item.spin += dt * 3; });
+  const raftY = s.waterline - 22;
+  for (const item of s.debris) if (Math.hypot(item.x - s.raftX, item.y - raftY) < item.size + 30) { endGame('WASHED OUT'); return; }
+  s.supplies = s.supplies.filter((item) => {
+    if (Math.hypot(item.x - s.raftX, item.y - raftY) < item.size + 30) { s.collected += 1; return false; }
+    return item.y < canvas.height + 40;
+  });
+  s.debris = s.debris.filter((item) => item.y < canvas.height + 70);
+  if (s.waterline <= 150) { endGame('THE FLOOD WON'); return; }
+  score = Math.floor(s.time * 65 + s.collected * 250);
   scoreOutput.textContent = String(score).padStart(4, '0');
 }
-function drawDrive(c, w, h, s, now, full) {
-  const roadLeft = w * .08;
-  const roadRight = w * .92;
-  const laneWidth = (roadRight - roadLeft) / 3;
-  const lane = s?.lane ?? 1;
+function drawFlood(c, w, h, s, now, full) {
+  const waterline = s?.waterline ?? 370;
+  const raftX = s?.raftX ?? w / 2;
+  const raftY = waterline - 22;
   c.fillStyle = '#8cdded'; c.fillRect(0, 0, w, h);
-  c.fillStyle = '#e9f0c8'; c.fillRect(0, h * .28, w, h * .72);
-  const rainbow = c.createLinearGradient(0, h * .28, 0, h);
-  rainbow.addColorStop(0, '#ff704a'); rainbow.addColorStop(.22, '#ffd45a'); rainbow.addColorStop(.45, '#6cff57'); rainbow.addColorStop(.68, '#7bd8ed'); rainbow.addColorStop(1, '#bd91ff');
-  c.fillStyle = rainbow; c.fillRect(roadLeft, h * .28, laneWidth, h * .72);
-  c.fillStyle = '#30333e'; c.fillRect(roadLeft + laneWidth, h * .28, laneWidth, h * .72);
-  c.fillStyle = '#294735'; c.fillRect(roadLeft + laneWidth * 2, h * .28, laneWidth, h * .72);
-  c.strokeStyle = '#111114'; c.lineWidth = 4; c.strokeRect(roadLeft, h * .28, roadRight - roadLeft, h * .72);
-  c.strokeStyle = 'rgba(242,240,233,.72)'; c.lineWidth = 3; c.setLineDash([24, 26]);
-  for (let i = 1; i < 3; i++) { c.beginPath(); c.moveTo(roadLeft + laneWidth * i, h * .28); c.lineTo(roadLeft + laneWidth * i, h); c.stroke(); }
-  c.setLineDash([]);
-  c.fillStyle = 'rgba(17,17,20,.12)'; c.fillRect(roadLeft, h * .28, roadRight - roadLeft, 4);
-  c.fillStyle = '#111114'; c.font = '500 13px Courier New, monospace';
-  c.textAlign = 'center';
-  DRIVE_LANES.forEach((driveLane, index) => {
-    const x = roadLeft + laneWidth * (index + .5);
-    c.fillStyle = index === 0 ? '#111114' : driveLane.color;
-    c.fillText(driveLane.multiplier + 'X ' + driveLane.label, x, 34);
-    if (index === lane) { c.strokeStyle = driveLane.color; c.lineWidth = 5; c.strokeRect(roadLeft + laneWidth * index + 7, h * .31, laneWidth - 14, h * .64); }
-  });
-  c.textAlign = 'left'; c.fillStyle = '#111114'; c.fillText('SCORE ' + String(score).padStart(4, '0'), 28, 34);
-  (s?.obstacles || []).forEach((obstacle) => drawCar(c, driveLaneX(w, obstacle.lane), obstacle.y, obstacle.color, false));
-  drawCar(c, s?.carX ?? driveLaneX(w, 1), h - 88, '#ff704a', true);
+  c.fillStyle = '#e9f0c8'; c.fillRect(0, 100, w, Math.max(0, waterline - 100));
+  c.fillStyle = '#f8c45a'; c.beginPath(); c.arc(w * .78, 118, 48, 0, Math.PI * 2); c.fill();
+  c.fillStyle = '#547f75'; c.fillRect(0, waterline - 56, w, 56);
+  c.fillStyle = 'rgba(17,17,20,.2)'; for (let x = 0; x < w; x += 76) c.fillRect(x, waterline - 56 - (x % 3) * 7, 44, 5);
+  const water = c.createLinearGradient(0, waterline, 0, h); water.addColorStop(0, '#3f9bb2'); water.addColorStop(1, '#173a62'); c.fillStyle = water; c.fillRect(0, waterline, w, h - waterline);
+  c.strokeStyle = '#7bd8ed'; c.lineWidth = 4; c.beginPath(); c.moveTo(0, waterline); c.lineTo(w, waterline); c.stroke();
+  c.strokeStyle = 'rgba(242,240,233,.55)'; c.lineWidth = 3;
+  for (let x = -50; x < w + 60; x += 100) { const wave = Math.sin((x + (s?.wave || 0) * 20) / 26) * 5; c.beginPath(); c.moveTo(x, waterline + 25 + wave); c.lineTo(x + 54, waterline + 25 - wave); c.stroke(); }
+  c.fillStyle = '#111114'; c.font = '500 13px Courier New, monospace'; c.fillText('SCORE ' + String(score).padStart(4, '0'), 28, 34); c.fillText('SUPPLIES ' + String(s?.collected || 0).padStart(2, '0'), 28, 56); c.textAlign = 'right'; c.fillText('WATER RISING', w - 28, 34); c.textAlign = 'left';
+  (s?.supplies || []).forEach((item) => drawSupply(c, item.x, item.y, item.spin));
+  (s?.debris || []).forEach((item) => drawDebris(c, item.x, item.y, item.size, item.angle));
+  drawRaft(c, raftX, raftY);
 }
-function drawCar(c, x, y, color, player) { c.save(); c.translate(x, y); c.fillStyle = color; c.strokeStyle = '#111114'; c.lineWidth = 4; c.fillRect(-27, -42, 54, 84); c.strokeRect(-27, -42, 54, 84); c.fillStyle = player ? '#7bd8ed' : '#f2f0e9'; c.fillRect(-18, -26, 36, 24); c.strokeRect(-18, -26, 36, 24); c.fillStyle = '#111114'; c.fillRect(-34, -31, 7, 20); c.fillRect(27, -31, 7, 20); c.fillRect(-34, 13, 7, 20); c.fillRect(27, 13, 7, 20); c.restore(); }
+function drawSupply(c, x, y, spin) { c.save(); c.translate(x, y); c.rotate(Math.sin(spin) * .12); c.fillStyle = '#ffd45a'; c.strokeStyle = '#111114'; c.lineWidth = 4; c.fillRect(-18, -15, 36, 30); c.strokeRect(-18, -15, 36, 30); c.strokeStyle = '#ff704a'; c.beginPath(); c.moveTo(-18, 0); c.lineTo(18, 0); c.moveTo(0, -15); c.lineTo(0, 15); c.stroke(); c.restore(); }
+function drawDebris(c, x, y, size, angle) { c.save(); c.translate(x, y); c.rotate(angle); c.fillStyle = '#7d4936'; c.strokeStyle = '#111114'; c.lineWidth = 4; c.fillRect(-size, -9, size * 2, 18); c.strokeRect(-size, -9, size * 2, 18); c.fillStyle = '#bd91ff'; c.fillRect(-size + 8, -5, 9, 10); c.restore(); }
+function drawRaft(c, x, y) { c.save(); c.translate(x, y); c.fillStyle = '#a95d36'; c.strokeStyle = '#111114'; c.lineWidth = 4; c.beginPath(); c.ellipse(0, 0, 50, 14, 0, 0, Math.PI * 2); c.fill(); c.stroke(); c.fillStyle = '#f2f0e9'; c.fillRect(-5, -48, 8, 38); c.fillStyle = '#ffd45a'; c.beginPath(); c.moveTo(2, -47); c.lineTo(35, -20); c.lineTo(2, -20); c.closePath(); c.fill(); c.stroke(); c.restore(); }
 
 function newMeteorState() { return { ship: { x: 450 }, rocks: [], shots: [], spawn: 0, time: 0 }; }
 function updateMeteor(dt) { const s = gameState; s.time += dt; if (keys.a || keys.arrowleft) s.ship.x -= 330 * dt; if (keys.d || keys.arrowright) s.ship.x += 330 * dt; s.ship.x = Math.max(35, Math.min(865, s.ship.x)); s.spawn -= dt; if (s.spawn <= 0) { s.spawn = Math.max(.32, .75 - s.time / 80); s.rocks.push({ x: 35 + Math.random() * 830, y: -35, size: 18 + Math.random() * 18, speed: 100 + Math.random() * 70, spin: Math.random() * 6 }); } s.rocks.forEach((rock) => { rock.y += rock.speed * dt; rock.spin += dt; }); s.shots.forEach((shot) => shot.y -= 500 * dt); for (let i = s.shots.length - 1; i >= 0; i--) { const shot = s.shots[i]; let hit = -1; for (let j = 0; j < s.rocks.length; j++) if (Math.hypot(shot.x - s.rocks[j].x, shot.y - s.rocks[j].y) < s.rocks[j].size + 8) { hit = j; break; } if (hit > -1) { s.rocks.splice(hit, 1); s.shots.splice(i, 1); score += 125; scoreOutput.textContent = String(score).padStart(4, '0'); } } s.shots = s.shots.filter((shot) => shot.y > -30); for (const rock of s.rocks) if (rock.y > 550) endGame('SKY OVERRUN'); }
@@ -221,17 +197,17 @@ function canvasPoint(event) { const box = canvas.getBoundingClientRect(); return
 
 const demoContexts = {
   chef: document.querySelector('#demo-chef').getContext('2d'),
-  drive: document.querySelector('#demo-drive').getContext('2d'),
+  flood: document.querySelector('#demo-flood').getContext('2d'),
   meteor: document.querySelector('#demo-meteor').getContext('2d')
 };
-function drawDemos() { const now = performance.now(); drawDemoChef(demoContexts.chef, now); drawDemoDrive(demoContexts.drive, now); drawDemoMeteor(demoContexts.meteor, now); }
+function drawDemos() { const now = performance.now(); drawDemoChef(demoContexts.chef, now); drawDemoFlood(demoContexts.flood, now); drawDemoMeteor(demoContexts.meteor, now); }
 function loopDemos(now) {
   if (!modal.classList.contains('is-open') && !document.hidden) {
-    drawDemoChef(demoContexts.chef, now); drawDemoDrive(demoContexts.drive, now); drawDemoMeteor(demoContexts.meteor, now);
+    drawDemoChef(demoContexts.chef, now); drawDemoFlood(demoContexts.flood, now); drawDemoMeteor(demoContexts.meteor, now);
   }
   requestAnimationFrame(loopDemos);
 }
 function drawDemoChef(c, now) { const w=c.canvas.width,h=c.canvas.height; drawChef(c,w,h,{order:Math.floor(now/1000)%5,timer:3.4,foods:[{type:Math.floor(now/650)%3,x:160+(now/10)%210,y:145,size:25,drift:now/800},{type:2,x:360-(now/16)%160,y:175,size:22,drift:now/900}]},now,false); }
-function drawDemoDrive(c, now) { const w=c.canvas.width,h=c.canvas.height; const obs=[{lane:0,y:(now/4)%350-60,color:'#ff9c40',width:32},{lane:1,y:(now/5+130)%350-60,color:'#bd91ff',width:28},{lane:2,y:(now/6+220)%350-60,color:'#7bd8ed',width:28}]; const lane=Math.floor(now / 1700) % 3; drawDrive(c,w,h,{lane,targetLane:lane,carX:driveLaneX(w,lane),roadOffset:(now/5)%90,obstacles:obs},now,false); }
+function drawDemoFlood(c, now) { const w=c.canvas.width,h=c.canvas.height; const waterline=145 + Math.sin(now / 850) * 15; const s={waterline,raftX:w / 2 + Math.sin(now / 630) * 105,supplies:[{x:150+(now/4)%260,y:128,spin:now/500}],debris:[{x:330+(now/8)%150,y:84,size:18,angle:now/700},{x:430-(now/10)%180,y:170,size:23,angle:-now/900}],collected:2,wave:now/500}; drawFlood(c,w,h,s,now,false); }
 function drawDemoMeteor(c, now) { const w=c.canvas.width,h=c.canvas.height; const rocks=[...Array(5)].map((_,i)=>({x:(i*113+80+(now/18)%(w-80))%w,y:(i*67+(now/5)%(h+100))-50,size:12+(i%3)*5,spin:now/900+i})); drawMeteor(c,w,h,{ship:{x:w/2+Math.sin(now/700)*130},rocks,shots:[{x:w/2,y:(now/2)%h}]},now,false); }
 drawDemos(); requestAnimationFrame(loopDemos);

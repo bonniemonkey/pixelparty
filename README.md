@@ -3,7 +3,7 @@
 Pixel Party is a static, school-friendly arcade landing page with three vanilla JavaScript mini-games:
 
 - Fast Food Chef
-- Drive Boss
+- Floodbound
 - Meteor Shooter
 
 ## Run locally
