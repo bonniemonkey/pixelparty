@@ -12,7 +12,7 @@ const startButton = document.querySelector('#start-game');
 
 const games = {
   chef: { title: 'Fast Food Chef', kicker: '// ORDER UP', instructions: 'Click the matching food before the order expires.', controls: 'MOUSE / CLICK' },
-  drive: { title: 'Drive Boss', kicker: '// STAY IN YOUR LANE', instructions: 'Use A / D or the arrow keys to dodge traffic.', controls: 'A / D OR ARROWS' },
+  drive: { title: 'Drive Boss', kicker: '// PICK YOUR RISK', instructions: 'Switch between three lanes. Tap a lane or use A / D.', controls: 'A / D / ARROWS / TAP' },
   meteor: { title: 'Meteor Shooter', kicker: '// CLEAR THE SKY', instructions: 'Move with A / D and press SPACE or click to fire.', controls: 'A / D + SPACE / CLICK' }
 };
 
@@ -31,6 +31,10 @@ document.querySelectorAll('[data-close-game]').forEach((button) => button.addEve
 document.addEventListener('keydown', (event) => {
   keys[event.key.toLowerCase()] = true;
   if (event.key === 'Escape' && modal.classList.contains('is-open')) closeGame();
+  if (activeGame === 'drive' && running && !event.repeat) {
+    if (event.key === 'ArrowLeft' || event.key.toLowerCase() === 'a') moveDriveLane(-1);
+    if (event.key === 'ArrowRight' || event.key.toLowerCase() === 'd') moveDriveLane(1);
+  }
   if (event.code === 'Space' && activeGame === 'meteor' && running) { event.preventDefault(); shootMeteor(); }
 });
 document.addEventListener('keyup', (event) => { keys[event.key.toLowerCase()] = false; });
@@ -38,6 +42,7 @@ startButton.addEventListener('click', startGame);
 canvas.addEventListener('pointerdown', (event) => {
   const point = canvasPoint(event);
   if (activeGame === 'chef' && running) chefClick(point.x, point.y);
+  if (activeGame === 'drive' && running) selectDriveLane(point.x);
   if (activeGame === 'meteor' && running) { gameState.ship.x = point.x; shootMeteor(); }
 });
 window.addEventListener('resize', drawDemos);
@@ -125,9 +130,85 @@ function drawChef(c, w, h, s, now, full) {
 }
 function drawFood(c, x, y, type, size) { c.save(); c.translate(x, y); c.fillStyle = type === 0 ? '#ffd45a' : type === 1 ? '#7bd8ed' : '#bd91ff'; c.strokeStyle = '#111114'; c.lineWidth = 5; c.beginPath(); if (type === 0) c.arc(0, 0, size, 0, Math.PI * 2); if (type === 1) { c.moveTo(0, -size); c.lineTo(size, size); c.lineTo(-size, size); c.closePath(); } if (type === 2) { for (let i = 0; i < 8; i++) { const a = (Math.PI * 2 / 8) * i; c.lineTo(Math.cos(a) * size, Math.sin(a) * size); } c.closePath(); } c.fill(); c.stroke(); c.restore(); }
 
-function newDriveState() { return { carX: 450, roadOffset: 0, obstacles: [], spawn: 0, speed: 180, time: 0 }; }
-function updateDrive(dt) { const s = gameState; s.time += dt; s.roadOffset = (s.roadOffset + s.speed * dt) % 90; if (keys.a || keys.arrowleft) s.carX -= 280 * dt; if (keys.d || keys.arrowright) s.carX += 280 * dt; s.carX = Math.max(290, Math.min(610, s.carX)); s.spawn -= dt; if (s.spawn <= 0) { s.spawn = Math.max(.45, 1.1 - s.time / 65); s.obstacles.push({ x: [330, 450, 570][Math.floor(Math.random() * 3)], y: -70, color: Math.random() > .5 ? '#bd91ff' : '#7bd8ed' }); } s.obstacles.forEach((obstacle) => obstacle.y += s.speed * dt); s.obstacles = s.obstacles.filter((obstacle) => obstacle.y < 570); for (const obstacle of s.obstacles) if (Math.abs(obstacle.x - s.carX) < 52 && Math.abs(obstacle.y - 430) < 72) endGame('CRASHED OUT'); score = Math.floor(s.time * 100); scoreOutput.textContent = String(score).padStart(4, '0'); }
-function drawDrive(c, w, h, s, now, full) { c.fillStyle = '#8cdded'; c.fillRect(0, 0, w, h); c.fillStyle = '#e9f0c8'; c.fillRect(0, h * .29, w, h * .71); c.fillStyle = '#32333e'; c.beginPath(); c.moveTo(w * .32, h * .29); c.lineTo(w * .68, h * .29); c.lineTo(w * .91, h); c.lineTo(w * .09, h); c.closePath(); c.fill(); c.fillStyle = '#ffd45a'; for (let y = -75 + (s?.roadOffset || 0); y < h; y += 90) c.fillRect(w / 2 - 4, y, 8, 38); c.fillStyle = '#111114'; c.font = '500 15px DM Mono, monospace'; c.fillText('DISTANCE ' + String(score).padStart(4, '0'), 28, 42); (s?.obstacles || []).forEach((obstacle) => drawCar(c, obstacle.x, obstacle.y, obstacle.color, false)); drawCar(c, s?.carX || w / 2, h - 88, '#ff704a', true); }
+const DRIVE_LANES = [
+  { multiplier: 5, label: 'RAINBOW', color: '#ff704a' },
+  { multiplier: 2, label: 'RUSH', color: '#7bd8ed' },
+  { multiplier: 1, label: 'SAFE', color: '#6cff57' }
+];
+
+function driveLaneX(width, lane) { return width * (0.25 + lane * 0.25); }
+function chooseDriveLane() {
+  const roll = Math.random();
+  if (roll < 0.52) return 0;
+  if (roll < 0.82) return 1;
+  return 2;
+}
+function newDriveState() {
+  return { lane: 1, targetLane: 1, carX: 450, roadOffset: 0, obstacles: [], spawn: .35, speed: 220, time: 0, distance: 0 };
+}
+function moveDriveLane(direction) {
+  if (!gameState || activeGame !== 'drive') return;
+  gameState.targetLane = Math.max(0, Math.min(2, gameState.targetLane + direction));
+}
+function selectDriveLane(x) {
+  if (!gameState || activeGame !== 'drive') return;
+  gameState.targetLane = Math.max(0, Math.min(2, Math.floor(x / (canvas.width / 3))));
+}
+function updateDrive(dt) {
+  const s = gameState;
+  s.time += dt;
+  s.roadOffset = (s.roadOffset + s.speed * dt) % 88;
+  s.carX += (driveLaneX(canvas.width, s.targetLane) - s.carX) * Math.min(1, dt * 14);
+  s.lane = Math.abs(s.carX - driveLaneX(canvas.width, s.targetLane)) < 18 ? s.targetLane : s.lane;
+  s.spawn -= dt;
+  if (s.spawn <= 0) {
+    s.spawn = Math.max(.48, 1.05 - s.time / 75);
+    const lane = chooseDriveLane();
+    s.obstacles.push({ lane, y: -72, color: lane === 0 ? '#ff9c40' : Math.random() > .5 ? '#bd91ff' : '#7bd8ed', width: lane === 0 ? 36 : 30 });
+    if (lane === 0 && Math.random() < .34) s.obstacles.push({ lane: 0, y: -240, color: '#ef3838', width: 34 });
+  }
+  for (const obstacle of s.obstacles) obstacle.y += s.speed * dt;
+  s.obstacles = s.obstacles.filter((obstacle) => obstacle.y < canvas.height + 90);
+  for (const obstacle of s.obstacles) {
+    const obstacleX = driveLaneX(canvas.width, obstacle.lane);
+    if (Math.abs(obstacleX - s.carX) < obstacle.width + 25 && Math.abs(obstacle.y - (canvas.height - 88)) < 74) {
+      endGame('CRASHED OUT');
+      return;
+    }
+  }
+  s.distance += s.speed * dt;
+  score = Math.floor(s.distance * DRIVE_LANES[s.lane].multiplier / 10);
+  scoreOutput.textContent = String(score).padStart(4, '0');
+}
+function drawDrive(c, w, h, s, now, full) {
+  const roadLeft = w * .08;
+  const roadRight = w * .92;
+  const laneWidth = (roadRight - roadLeft) / 3;
+  const lane = s?.lane ?? 1;
+  c.fillStyle = '#8cdded'; c.fillRect(0, 0, w, h);
+  c.fillStyle = '#e9f0c8'; c.fillRect(0, h * .28, w, h * .72);
+  const rainbow = c.createLinearGradient(0, h * .28, 0, h);
+  rainbow.addColorStop(0, '#ff704a'); rainbow.addColorStop(.22, '#ffd45a'); rainbow.addColorStop(.45, '#6cff57'); rainbow.addColorStop(.68, '#7bd8ed'); rainbow.addColorStop(1, '#bd91ff');
+  c.fillStyle = rainbow; c.fillRect(roadLeft, h * .28, laneWidth, h * .72);
+  c.fillStyle = '#30333e'; c.fillRect(roadLeft + laneWidth, h * .28, laneWidth, h * .72);
+  c.fillStyle = '#294735'; c.fillRect(roadLeft + laneWidth * 2, h * .28, laneWidth, h * .72);
+  c.strokeStyle = '#111114'; c.lineWidth = 4; c.strokeRect(roadLeft, h * .28, roadRight - roadLeft, h * .72);
+  c.strokeStyle = 'rgba(242,240,233,.72)'; c.lineWidth = 3; c.setLineDash([24, 26]);
+  for (let i = 1; i < 3; i++) { c.beginPath(); c.moveTo(roadLeft + laneWidth * i, h * .28); c.lineTo(roadLeft + laneWidth * i, h); c.stroke(); }
+  c.setLineDash([]);
+  c.fillStyle = 'rgba(17,17,20,.12)'; c.fillRect(roadLeft, h * .28, roadRight - roadLeft, 4);
+  c.fillStyle = '#111114'; c.font = '500 13px Courier New, monospace';
+  c.textAlign = 'center';
+  DRIVE_LANES.forEach((driveLane, index) => {
+    const x = roadLeft + laneWidth * (index + .5);
+    c.fillStyle = index === 0 ? '#111114' : driveLane.color;
+    c.fillText(driveLane.multiplier + 'X ' + driveLane.label, x, 34);
+    if (index === lane) { c.strokeStyle = driveLane.color; c.lineWidth = 5; c.strokeRect(roadLeft + laneWidth * index + 7, h * .31, laneWidth - 14, h * .64); }
+  });
+  c.textAlign = 'left'; c.fillStyle = '#111114'; c.fillText('SCORE ' + String(score).padStart(4, '0'), 28, 34);
+  (s?.obstacles || []).forEach((obstacle) => drawCar(c, driveLaneX(w, obstacle.lane), obstacle.y, obstacle.color, false));
+  drawCar(c, s?.carX ?? driveLaneX(w, 1), h - 88, '#ff704a', true);
+}
 function drawCar(c, x, y, color, player) { c.save(); c.translate(x, y); c.fillStyle = color; c.strokeStyle = '#111114'; c.lineWidth = 4; c.fillRect(-27, -42, 54, 84); c.strokeRect(-27, -42, 54, 84); c.fillStyle = player ? '#7bd8ed' : '#f2f0e9'; c.fillRect(-18, -26, 36, 24); c.strokeRect(-18, -26, 36, 24); c.fillStyle = '#111114'; c.fillRect(-34, -31, 7, 20); c.fillRect(27, -31, 7, 20); c.fillRect(-34, 13, 7, 20); c.fillRect(27, 13, 7, 20); c.restore(); }
 
 function newMeteorState() { return { ship: { x: 450 }, rocks: [], shots: [], spawn: 0, time: 0 }; }
@@ -138,9 +219,19 @@ function drawMeteor(c, w, h, s) { c.fillStyle = '#24204f'; c.fillRect(0, 0, w, h
 function endGame(message) { running = false; cancelAnimationFrame(animationId); overlayLabel.textContent = message; startButton.innerHTML = 'PLAY AGAIN <span>↗</span>'; overlay.style.display = 'flex'; }
 function canvasPoint(event) { const box = canvas.getBoundingClientRect(); return { x: (event.clientX - box.left) * canvas.width / box.width, y: (event.clientY - box.top) * canvas.height / box.height }; }
 
-function drawDemos() { drawDemoChef(document.querySelector('#demo-chef').getContext('2d'), performance.now()); drawDemoDrive(document.querySelector('#demo-drive').getContext('2d'), performance.now()); drawDemoMeteor(document.querySelector('#demo-meteor').getContext('2d'), performance.now()); }
-function loopDemos(now) { drawDemoChef(document.querySelector('#demo-chef').getContext('2d'), now); drawDemoDrive(document.querySelector('#demo-drive').getContext('2d'), now); drawDemoMeteor(document.querySelector('#demo-meteor').getContext('2d'), now); requestAnimationFrame(loopDemos); }
+const demoContexts = {
+  chef: document.querySelector('#demo-chef').getContext('2d'),
+  drive: document.querySelector('#demo-drive').getContext('2d'),
+  meteor: document.querySelector('#demo-meteor').getContext('2d')
+};
+function drawDemos() { const now = performance.now(); drawDemoChef(demoContexts.chef, now); drawDemoDrive(demoContexts.drive, now); drawDemoMeteor(demoContexts.meteor, now); }
+function loopDemos(now) {
+  if (!modal.classList.contains('is-open') && !document.hidden) {
+    drawDemoChef(demoContexts.chef, now); drawDemoDrive(demoContexts.drive, now); drawDemoMeteor(demoContexts.meteor, now);
+  }
+  requestAnimationFrame(loopDemos);
+}
 function drawDemoChef(c, now) { const w=c.canvas.width,h=c.canvas.height; drawChef(c,w,h,{order:Math.floor(now/1000)%5,timer:3.4,foods:[{type:Math.floor(now/650)%3,x:160+(now/10)%210,y:145,size:25,drift:now/800},{type:2,x:360-(now/16)%160,y:175,size:22,drift:now/900}]},now,false); }
-function drawDemoDrive(c, now) { const w=c.canvas.width,h=c.canvas.height; const obs=[{x:260,y:(now/4)%350-60,color:'#bd91ff'},{x:390,y:(now/5+130)%350-60,color:'#7bd8ed'}]; drawDrive(c,w,h,{carX:300+Math.sin(now/750)*100,roadOffset:(now/5)%90,obstacles:obs},now,false); }
+function drawDemoDrive(c, now) { const w=c.canvas.width,h=c.canvas.height; const obs=[{lane:0,y:(now/4)%350-60,color:'#ff9c40',width:32},{lane:1,y:(now/5+130)%350-60,color:'#bd91ff',width:28},{lane:2,y:(now/6+220)%350-60,color:'#7bd8ed',width:28}]; const lane=Math.floor(now / 1700) % 3; drawDrive(c,w,h,{lane,targetLane:lane,carX:driveLaneX(w,lane),roadOffset:(now/5)%90,obstacles:obs},now,false); }
 function drawDemoMeteor(c, now) { const w=c.canvas.width,h=c.canvas.height; const rocks=[...Array(5)].map((_,i)=>({x:(i*113+80+(now/18)%(w-80))%w,y:(i*67+(now/5)%(h+100))-50,size:12+(i%3)*5,spin:now/900+i})); drawMeteor(c,w,h,{ship:{x:w/2+Math.sin(now/700)*130},rocks,shots:[{x:w/2,y:(now/2)%h}]},now,false); }
 drawDemos(); requestAnimationFrame(loopDemos);
